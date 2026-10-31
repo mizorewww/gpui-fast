@@ -5960,6 +5960,9 @@ impl Window {
     /// dispatches whatever it resolves (scroll steps, synthesized taps)
     /// through the ordinary mouse-event path.
     fn dispatch_touch_event(&mut self, event: &TouchEvent, cx: &mut App) {
+        if self.invalidator.is_dirty() {
+            self.draw(cx).clear(cx);
+        }
         let mut event = event.clone();
         if !self.touch_prediction_enabled {
             event.predicted_position = None;
