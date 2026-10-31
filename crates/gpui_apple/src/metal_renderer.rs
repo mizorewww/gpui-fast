@@ -524,6 +524,7 @@ impl MetalRenderer {
         // nothing to do
     }
 
+    #[cfg(not(feature = "frame-observation"))]
     pub fn draw(&mut self, scene: &Scene) {
         let layer = match &self.layer {
             Some(l) => l.clone(),
@@ -565,6 +566,72 @@ impl MetalRenderer {
             command_buffer.present_drawable(drawable);
             command_buffer.commit();
         }
+    }
+
+    #[cfg(feature = "frame-observation")]
+    pub fn draw(&mut self, scene: &Scene) {
+        self.draw_with_status(scene);
+    }
+
+    #[cfg(feature = "frame-observation")]
+    /// Submit a drawable and report whether a real command buffer/presentation
+    /// was issued. This is not GPU completion or display presentation timing.
+    pub fn draw_with_status(&mut self, scene: &Scene) -> bool {
+        // Dispatch-source demand frames can run without returning to the
+        // enclosing Cocoa event-loop pool. Release per-draw autoreleased Metal
+        // objects here, before returning to the measured presentation caller.
+        // Only a bool escapes; drawable/encoder borrows remain inside the pool.
+        objc2::rc::autoreleasepool(|_| {
+            let layer = match &self.layer {
+                Some(l) => l.clone(),
+                None => {
+                    log::error!(
+                        "draw() called on headless renderer - use render_scene_to_image() instead"
+                    );
+                    return false;
+                }
+            };
+            let viewport_size = layer.drawable_size();
+            let viewport_size: Size<DevicePixels> = size(
+                (viewport_size.width.ceil() as i32).into(),
+                (viewport_size.height.ceil() as i32).into(),
+            );
+            // Material patch: nextDrawable can block until the compositor
+            // releases a drawable. Report that wait separately from CPU work.
+            let wait_started = gpui::profiler::trace_enabled().then(std::time::Instant::now);
+            let next_drawable = layer.next_drawable();
+            if let Some(wait_started) = wait_started {
+                gpui::profiler::record_presentation_wait(wait_started.elapsed());
+            }
+            let drawable = if let Some(drawable) = next_drawable {
+                drawable
+            } else {
+                log::error!(
+                    "failed to retrieve next drawable, drawable size: {:?}",
+                    viewport_size
+                );
+                return false;
+            };
+
+            let command_buffer = match self.render_frame(scene, drawable.texture(), viewport_size) {
+                Ok(command_buffer) => command_buffer,
+                Err(error) => {
+                    log::error!("failed to render: {error:#}");
+                    return false;
+                }
+            };
+
+            attach_gpu_timing(&command_buffer, "frame");
+            if self.presents_with_transaction {
+                command_buffer.commit();
+                command_buffer.wait_until_scheduled();
+                drawable.present();
+            } else {
+                command_buffer.present_drawable(drawable);
+                command_buffer.commit();
+            }
+            true
+        })
     }
 
     pub(crate) fn render_frame(
@@ -1517,7 +1584,10 @@ pub(crate) struct InstanceBindings {
     pub(crate) surfaces: InstanceBinding,
 }
 
-pub(crate) fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<InstanceBindings> {
+pub(crate) fn write_instances(
+    scene: &Scene,
+    writer: &mut InstanceBufferWriter,
+) -> Result<InstanceBindings> {
     Ok(InstanceBindings {
         quads: writer.write(&scene.quads)?,
         shadows: writer.write(&scene.shadows)?,
@@ -1751,6 +1821,40 @@ impl gpui::PlatformHeadlessRenderer for MetalHeadlessRenderer {
 
     fn sprite_atlas(&self) -> Arc<dyn gpui::PlatformAtlas> {
         self.renderer.sprite_atlas().clone()
+    }
+}
+
+#[cfg(feature = "frame-observation")]
+/// Material patch: while profiler tracing is enabled, report the driver's
+/// GPUStartTime/GPUEndTime for a command buffer committed after this call.
+pub(crate) fn attach_gpu_timing(command_buffer: &metal::CommandBufferRef, kind: &'static str) {
+    if !gpui::profiler::trace_enabled() {
+        return;
+    }
+    let submitted_at = std::time::Instant::now();
+    let block = RcBlock::new(move |command_buffer: ptr::NonNull<AnyObject>| {
+        // SAFETY: Metal hands its completion handlers the command buffer that
+        // completed; these read-only properties are valid once it completes.
+        let command_buffer = unsafe { command_buffer.as_ref() };
+        let (gpu_start_s, gpu_end_s, status): (f64, f64, usize) = unsafe {
+            (
+                objc2::msg_send![command_buffer, GPUStartTime],
+                objc2::msg_send![command_buffer, GPUEndTime],
+                objc2::msg_send![command_buffer, status],
+            )
+        };
+        gpui::profiler::record_gpu_execution(gpui::profiler::GpuExecution {
+            submitted_at,
+            gpu_start_s,
+            gpu_end_s,
+            kind,
+            // MTLCommandBufferStatusCompleted
+            completed: status == 4,
+        });
+    });
+    // SAFETY: Both pointee types are opaque views of the same Objective-C block pointer ABI.
+    unsafe {
+        command_buffer.add_completed_handler(&*RcBlock::as_ptr(&block).cast());
     }
 }
 
