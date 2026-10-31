@@ -597,13 +597,15 @@ impl LineLayoutCache {
         crate::fast::text::carry_over_line_layouts(&mut prev_frame, &mut curr_frame);
     }
 
-    pub fn layout_wrapped_line<Text>(
+    /// Wrapped line layout with `letter_spacing` after each character.
+    pub fn layout_wrapped_line_spaced<Text>(
         &self,
         text: Text,
         font_size: Pixels,
         runs: &[FontRun],
         wrap_width: Option<Pixels>,
         max_lines: Option<usize>,
+        letter_spacing: Pixels,
     ) -> Arc<WrappedLineLayout>
     where
         Text: AsRef<str>,
@@ -616,6 +618,7 @@ impl LineLayoutCache {
             runs,
             wrap_width,
             force_width: None,
+            letter_spacing,
         } as &dyn AsCacheKeyRef;
 
         let current_frame = self.current_frame.upgradable_read();
@@ -634,7 +637,13 @@ impl LineLayoutCache {
         } else {
             drop(current_frame);
             let text = SharedString::from(text);
-            let unwrapped_layout = self.layout_line::<&SharedString>(&text, font_size, runs, None);
+            let unwrapped_layout = self.layout_line_spaced::<&SharedString>(
+                &text,
+                font_size,
+                runs,
+                None,
+                letter_spacing,
+            );
             let wrap_boundaries = if let Some(wrap_width) = wrap_width {
                 unwrapped_layout.compute_wrap_boundaries(text.as_ref(), wrap_width, max_lines)
             } else {
@@ -651,6 +660,7 @@ impl LineLayoutCache {
                 runs: SmallVec::from(runs),
                 wrap_width,
                 force_width: None,
+                letter_spacing,
             });
 
             let mut current_frame = self.current_frame.write();
@@ -674,6 +684,22 @@ impl LineLayoutCache {
         Text: AsRef<str>,
         SharedString: From<Text>,
     {
+        self.layout_line_spaced(text, font_size, runs, force_width, px(0.))
+    }
+
+    /// [`Self::layout_line`] with `letter_spacing` after each character.
+    pub fn layout_line_spaced<Text>(
+        &self,
+        text: Text,
+        font_size: Pixels,
+        runs: &[FontRun],
+        force_width: Option<Pixels>,
+        letter_spacing: Pixels,
+    ) -> Arc<LineLayout>
+    where
+        Text: AsRef<str>,
+        SharedString: From<Text>,
+    {
         let _font_generation = self.clear_if_font_generation_changed();
         let key = &CacheKeyRef {
             text: text.as_ref(),
@@ -681,6 +707,7 @@ impl LineLayoutCache {
             runs,
             wrap_width: None,
             force_width,
+            letter_spacing,
         } as &dyn AsCacheKeyRef;
 
         let current_frame = self.current_frame.upgradable_read();
@@ -700,6 +727,7 @@ impl LineLayoutCache {
             if let Some(force_width) = force_width {
                 apply_force_width_to_layout(&mut layout, force_width);
             }
+            apply_letter_spacing(&mut layout, letter_spacing);
 
             let key = Arc::new(CacheKey {
                 text,
@@ -707,6 +735,7 @@ impl LineLayoutCache {
                 runs: SmallVec::from(runs),
                 wrap_width: None,
                 force_width,
+                letter_spacing,
             });
             let layout = Arc::new(layout);
             current_frame.lines.insert(key.clone(), layout.clone());
@@ -915,6 +944,32 @@ fn apply_force_width_to_layout(layout: &mut LineLayout, force_width: Pixels) {
     }
 }
 
+/// Add `spacing` after each visual advance, as CSS `letter-spacing` does:
+/// the line grows by it once per advance, including the last, and glyphs sharing
+/// an origin (combining marks) stay together. This runs after shaping, so it is
+/// the same on every platform text system, and carets and hit testing read the
+/// moved positions.
+fn apply_letter_spacing(layout: &mut LineLayout, spacing: Pixels) {
+    if spacing == px(0.) {
+        return;
+    }
+    let mut steps = 0.;
+    let mut last = None;
+    for run in &mut layout.runs {
+        for glyph in &mut run.glyphs {
+            let x = glyph.position.x;
+            if last.is_some_and(|last| x > last) {
+                steps += 1.;
+            }
+            last = Some(x);
+            glyph.position.x = x + spacing * steps;
+        }
+    }
+    if last.is_some() {
+        layout.width += spacing * (steps + 1.);
+    }
+}
+
 /// A run of text with a single font.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[expect(missing_docs)]
@@ -934,6 +989,7 @@ pub(crate) struct CacheKey {
     runs: SmallVec<[FontRun; 1]>,
     wrap_width: Option<Pixels>,
     force_width: Option<Pixels>,
+    letter_spacing: Pixels,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
@@ -943,6 +999,7 @@ struct CacheKeyRef<'a> {
     runs: &'a [FontRun],
     wrap_width: Option<Pixels>,
     force_width: Option<Pixels>,
+    letter_spacing: Pixels,
 }
 
 #[derive(Clone, Debug)]
@@ -1030,6 +1087,7 @@ impl Hash for dyn AsCacheKeyRef + '_ {
 impl AsCacheKeyRef for CacheKey {
     fn as_cache_key_ref(&self) -> CacheKeyRef<'_> {
         CacheKeyRef {
+            letter_spacing: self.letter_spacing,
             text: &self.text,
             font_size: self.font_size,
             runs: self.runs.as_slice(),
