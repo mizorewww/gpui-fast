@@ -10,6 +10,7 @@ autoexamples = false
 workspace = true
 
 [features]
+frame-observation = ["gpui/frame-observation"]
 default = ["multithreaded"]
 multithreaded = ["dep:wasm_thread", "scheduler/wasm-threads"]
 
