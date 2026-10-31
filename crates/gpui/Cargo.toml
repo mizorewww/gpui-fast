@@ -18,6 +18,8 @@ autobenches = false
 workspace = true
 
 [features]
+# Material dev overlay: frame statistics, vsync control, CPU scopes. Off for consumers.
+frame-observation = []
 default = ["font-kit", "wayland", "x11", "windows-manifest"]
 test-support = [
     "collections/test-support",
