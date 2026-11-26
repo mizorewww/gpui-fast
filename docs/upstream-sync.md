@@ -98,6 +98,15 @@ only hold the hooks that call into it.
    content mask within the viewport of the layer being painted, as hitboxes
    are clipped (`fast::layers::input::hitbox_mask`), and the content mask
    outside one. Only elements that call it are clipped.
+   Another exception is the system's spell checker (in `fast::spelling`):
+   `App::misspelled_words`, `App::spelling_guesses` and `App::learn_spelling`,
+   and the three `Platform` methods they call, whose default answers nothing.
+   A text field that underlines misspellings and offers corrections needs the
+   checker the system has, in the user's languages and with the words the
+   user taught it, and upstream offers no way to reach it; an application
+   cannot add it from outside, since the platform is GPUI's. On macOS the
+   methods are `NSSpellChecker`'s (`gpui_macos`'s `fast::spelling`); other
+   platforms find nothing until one implements them.
 6. **New files only inside `fast/`, or in our own crates** such as
    `crates/gpui_perf` (benchmarks, examples and the frame-measuring app) and
    `compat/` (the `gpui-pre-*` stand-ins GPUI Kit applications patch in).

@@ -668,6 +668,15 @@ pub trait Platform: 'static {
     fn keyboard_layout(&self) -> Box<dyn PlatformKeyboardLayout>;
     fn keyboard_mapper(&self) -> Rc<dyn PlatformKeyboardMapper>;
     fn on_keyboard_layout_change(&self, callback: Box<dyn FnMut()>);
+    fn misspelled_words(&self, text: &str) -> Vec<Range<usize>> {
+        crate::fast::spelling::unsupported(text)
+    }
+    fn spelling_guesses(&self, word: &str) -> Vec<String> {
+        crate::fast::spelling::unsupported(word)
+    }
+    fn learn_spelling(&self, word: &str) {
+        crate::fast::spelling::unsupported(word)
+    }
 }
 
 /// A handle to a platform's display, e.g. a monitor or laptop screen.

@@ -42,6 +42,7 @@ pub(crate) mod retained;
 pub(crate) mod rounded_clip;
 pub(crate) mod rounded_clip_scene;
 pub(crate) mod scene;
+pub(crate) mod spelling;
 pub(crate) mod splice;
 pub(crate) mod stats;
 pub(crate) mod text;
