@@ -10,3 +10,4 @@
 pub(crate) mod composition;
 pub(crate) mod display_link_lifecycle;
 pub(crate) mod menu;
+pub(crate) mod spelling;

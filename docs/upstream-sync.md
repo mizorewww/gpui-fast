@@ -107,6 +107,15 @@ only hold the hooks that call into it.
    a window itself, because the scale factor its scene is rasterized at and
    the coordinates of the platform's input are GPUI's. The addition is the two
    methods; at a zoom of 1, the default, nothing GPUI does changes.
+   Another exception is the system's spell checker (in `fast::spelling`):
+   `App::misspelled_words`, `App::spelling_guesses` and `App::learn_spelling`,
+   and the three `Platform` methods they call, whose default answers nothing.
+   A text field that underlines misspellings and offers corrections needs the
+   checker the system has, in the user's languages and with the words the
+   user taught it, and upstream offers no way to reach it; an application
+   cannot add it from outside, since the platform is GPUI's. On macOS the
+   methods are `NSSpellChecker`'s (`gpui_macos`'s `fast::spelling`); other
+   platforms find nothing until one implements them.
 6. **New files only inside `fast/`, or in our own crates** such as
    `crates/gpui_perf` (benchmarks, examples and the frame-measuring app) and
    `compat/` (the `gpui-pre-*` stand-ins GPUI Kit applications patch in).

@@ -221,6 +221,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = [
     "NSSavePanel",
     "NSScreen",
     "NSScroller",
+    "NSSpellChecker",
     "NSTrackingArea",
     "NSView",
     "NSVisualEffectView",
